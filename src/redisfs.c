@@ -129,7 +129,7 @@ int _g_fast = 0;
 int _g_read_only = 0;
 
 
-int _g_lastcheck = 0;
+
 
 
 
@@ -147,17 +147,13 @@ redis_alive()
      */
     if (_g_redis != NULL)
     {
-	if (time(NULL) - _g_lastcheck < 2)
-          return;
-
-        _g_lastcheck = time(NULL);
         reply = redisCommand(_g_redis, "PING");
 
         if ((reply != NULL) &&
-              (reply->str != NULL) && (strcmp(reply->str, "PONG") == 0))
+            (reply->str != NULL) && (strcmp(reply->str, "PONG") == 0))
         {
-              freeReplyObject(reply);
-              return;
+            freeReplyObject(reply);
+            return;
         }
         else
         {
@@ -314,11 +310,7 @@ find_inode(const char *path)
         val = atoi(reply->str);
         freeReplyObject(reply);
         if (val != -1)
-	{
-	    if (_g_debug)
-		fprintf(stderr, "find_inode(%s)->hit\n", path);
             return val;
-	}
         else
         {
           /**
@@ -836,19 +828,36 @@ fs_write(const char *path,
         memcpy(mem, buf, size);
 
       /**
-       * Batch setx2, delete, set new data
+       *  set the size & mtime.
        */
-        reply = redisCommand(_g_redis, "SET %s:INODE:%d:SIZE %d\r\nSET %s:INODE:%d:MTIME %d\r\nDEL %s:INODE:%d:DATA\r\nSET %s:INODE:%d:DATA %b",
-                              _g_prefix, inode, size, _g_prefix, inode, time(NULL), _g_prefix, inode,_g_prefix, inode, mem, size);
+        reply = redisCommand(_g_redis, "SET %s:INODE:%d:SIZE %d",
+                             _g_prefix, inode, size);
         freeReplyObject(reply);
 
+        reply = redisCommand(_g_redis, "SET %s:INODE:%d:MTIME %d",
+                             _g_prefix, inode, time(NULL));
+        freeReplyObject(reply);
+
+      /**
+       * Delete the current data.
+       */
+        reply = redisCommand(_g_redis, "DEL %s:INODE:%d:DATA",
+                             _g_prefix, inode);
+        freeReplyObject(reply);
+
+      /**
+       * Set the new data
+       */
+        reply = redisCommand(_g_redis, "SET %s:INODE:%d:DATA %b",
+                             _g_prefix, inode, mem, size);
+        freeReplyObject(reply);
         free(mem);
     }
     else
     {
         int sz;
         int new_sz;
-        //char *nw;
+        char *nw;
 
         /**
          * Get the current file size.
@@ -858,37 +867,60 @@ fs_write(const char *path,
         sz = atoi(reply->str);
         freeReplyObject(reply);
 
+        /**
+         * Get the current file contents.
+         */
+        reply =
+            redisCommand(_g_redis, "GET %s:INODE:%d:DATA", _g_prefix, inode);
+
+        /**
+         * OK so reply->str is a pointer to the current
+         * file contents.
+         *
+         * We need to resize this.
+         */
         new_sz = offset + size;
 
         /**
-         * Copy the new data.
+         * Create new memory.
          */
- 	char *mem = malloc(size);
-        memcpy(mem, buf, size);	
+        nw = (char *)malloc(new_sz);
+        memset(nw, '\0', new_sz);
+
+        /**
+         * Copy current contents.
+         */
+        memcpy(nw, reply->str, sz);
+
+        /**
+         * Copy the new written data.
+         */
+        memcpy(nw + offset, buf, size);
 
         /**
          * Now store contents.
          */
-	reply = redisCommand(_g_redis, "SET %s:INODE:%d:SIZE %d",
+        freeReplyObject(reply);
+
+        reply = redisCommand(_g_redis, "SET %s:INODE:%d:DATA %b",
+                             _g_prefix, inode, nw, new_sz);
+        freeReplyObject(reply);
+
+        /**
+         * Finally update the size & mtime.
+         */
+        reply = redisCommand(_g_redis, "SET %s:INODE:%d:SIZE %d",
                              _g_prefix, inode, new_sz);
         freeReplyObject(reply);
 
-	reply =redisCommand(_g_redis, "APPEND %s:INODE:%d:DATA %b",
-				_g_prefix, inode, mem, size);
-	freeReplyObject(reply);
-
-	//don't store mtime if fast used
-        if(!_g_fast)
-	{	
-         reply = redisCommand(_g_redis, "SET %s:INODE:%d:MTIME %d",
-                              _g_prefix, inode, time(NULL));
-         freeReplyObject(reply);
-        }
+        reply = redisCommand(_g_redis, "SET %s:INODE:%d:MTIME %d",
+                             _g_prefix, inode, time(NULL));
+        freeReplyObject(reply);
 
         /**
          * Free the memory.
          */
-	free(mem);
+        free(nw);
 
     }
 
