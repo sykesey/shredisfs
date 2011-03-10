@@ -838,9 +838,13 @@ fs_write(const char *path,
       /**
        * Batch setx2, delete, set new data
        */
-        reply = redisCommand(_g_redis, "SET %s:INODE:%d:SIZE %d\r\nSET %s:INODE:%d:MTIME %d\r\nDEL %s:INODE:%d:DATA\r\nSET %s:INODE:%d:DATA %b",
-                              _g_prefix, inode, size, _g_prefix, inode, time(NULL), _g_prefix, inode,_g_prefix, inode, mem, size);
+        reply = redisCommand(_g_redis, "SET %s:INODE:%d:SIZE %d\r\nSET %s:INODE:%d:MTIME %d\r\nDEL %s:INODE:%d:DATA",
+                              _g_prefix, inode, size, _g_prefix, inode, time(NULL), _g_prefix, inode);
         freeReplyObject(reply);
+
+	reply = redisCommand(_g_redis, "SET %s:INODE:%d:DATA %b",
+			     _g_prefix, inode, mem, size);
+	freeReplyObject(reply);
 
         free(mem);
     }
