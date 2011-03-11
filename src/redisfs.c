@@ -967,21 +967,22 @@ fs_read(const char *path, char *buf, size_t size, off_t offset,
 
     if (sz < size)
         size = sz;
+    if (offset+size > sz)
+	size = sz - offset;
 
     /**
      * Get the file contents.
      * this is a pretty bad bottleneck here - it grabs the entire contents and then memcpy's the bit it likes
      *
      */
- 
-    reply = redisCommand(_g_redis, "GET %s:INODE:%d:DATA", _g_prefix, inode);
+    reply = redisCommand(_g_redis, "GETRANGE %s:INODE:%d:DATA %lu %lu", _g_prefix, inode, offset, size+offset );
 
+    //size_t len = reply->len;
     /**
      * Copy the data into the callee's buffer.
      */
-
-    if (size > 0)
-        memcpy(buf, reply->str +offset , size);
+    if (size >0)
+        memcpy(buf, reply->str , size);
 
     freeReplyObject(reply);
 
