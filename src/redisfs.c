@@ -281,6 +281,7 @@ remove_inode(int inode)
     while (names[i] != NULL)
     {
         redisAppendCommand(_g_redis, names[i], _g_prefix, inode);
+	i+=1;
     }
     i = 0;
     while (names[i] != NULL)
