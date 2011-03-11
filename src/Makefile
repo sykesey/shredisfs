@@ -2,8 +2,8 @@
 #
 #  Flags and stuffs.
 #
-#CFLAGS=-ggdb -pg -Wall -Werror `pkg-config fuse --cflags` -I. -DVERSION=$(VERSION)
-CFLAGS=-Wall -Werror -O3 `pkg-config fuse --cflags` -I. -DVERSION=$(VERSION)
+CFLAGS=-ggdb -pg -Wall -Werror `pkg-config fuse --cflags` -I. -DVERSION=$(VERSION)
+#CFLAGS=-Wall -Werror -O3 `pkg-config fuse --cflags` -I. -DVERSION=$(VERSION)
 LDFLAGS=`pkg-config fuse --libs`
 
 

@@ -147,10 +147,6 @@ redis_alive()
      */
     if (_g_redis != NULL)
     {
-	if (time(NULL) - _g_lastcheck < 2)
-          return;
-
-        _g_lastcheck = time(NULL);
         reply = redisCommand(_g_redis, "PING");
 
         if ((reply != NULL) &&
@@ -964,31 +960,28 @@ fs_read(const char *path, char *buf, size_t size, off_t offset,
     /**
      * Get the current file size.
      */
-    redisAppendCommand(_g_redis, "GET %s:INODE:%d:SIZE",
+    reply = redisCommand(_g_redis, "GET %s:INODE:%d:SIZE",
                          _g_prefix, inode, size);
+    sz = atoi(reply->str);
+    freeReplyObject(reply);
+
+    if (sz < size)
+        size = sz;
 
     /**
      * Get the file contents.
      * this is a pretty bad bottleneck here - it grabs the entire contents and then memcpy's the bit it likes
      *
      */
-    redisAppendCommand(_g_redis, "GET %s:INODE:%d:DATA", _g_prefix, inode);
+ 
+    reply = redisCommand(_g_redis, "GET %s:INODE:%d:DATA", _g_prefix, inode);
 
-    /* read */
-    
-    redisGetReply(_g_redis,(void**)&reply);
-    sz = atoi(reply->str);
-    freeReplyObject(reply);
-
-    redisGetReply(_g_redis,(void**)&reply);
     /**
      * Copy the data into the callee's buffer.
      */
-    if (sz < size)
-        size = sz;
 
     if (size > 0)
-        memcpy(buf, reply->str + offset, size);
+        memcpy(buf, reply->str +offset , size);
 
     freeReplyObject(reply);
 
