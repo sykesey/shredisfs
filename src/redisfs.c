@@ -349,26 +349,25 @@ find_inode(const char *path)
    */
     reply = redisCommand(_g_redis, "SMEMBERS %s:%s", _g_prefix, parent);
 
+    char* memcommand = malloc(1048576);
+    sprintf(memcommand,"MGET");
     if ((reply != NULL) && (reply->type == REDIS_REPLY_ARRAY))
     {
         int i;
-
+	for (i = 0; i < reply->elements; i++)
+        {
+            sprintf(memcommand+strlen(memcommand), " %s:INODE:%s:NAME", _g_prefix, reply->element[i]->str);
+        }
+        redisReply *r = NULL;
+        r = redisCommand(_g_redis, memcommand);
         for (i = 0; i < reply->elements; i++)
         {
-            redisReply *r = NULL;
-
-            char *name = reply->element[i]->str;
-
-            r = redisCommand(_g_redis, "GET %s:INODE:%s:NAME",
-                             _g_prefix, name);
-
-            if ((r != NULL) && (strcmp(r->str, entry) == 0))
+            if ((r->element[i] != NULL) && (strcmp(r->element[i]->str, entry) == 0))
             {
-                val = atoi(name);
+                val = atoi(reply->element[i]->str);
             }
-
-            freeReplyObject(r);
         }
+        freeReplyObject(r);
     }
 
     freeReplyObject(reply);
@@ -465,6 +464,8 @@ fs_readdir(const char *path,
      */
     reply = redisCommand(_g_redis, "SMEMBERS %s:%s", _g_prefix, path);
 
+    char *memcommand = malloc(1048576);
+    sprintf(memcommand,"MGET");
     if ((reply != NULL) && (reply->type == REDIS_REPLY_ARRAY))
     {
       /**
@@ -475,17 +476,19 @@ fs_readdir(const char *path,
        */
         for (i = 0; i < reply->elements; i++)
         {
-            redisReply *r = NULL;
             char *name = reply->element[i]->str;
-
-            r = redisCommand(_g_redis, "GET %s:INODE:%s:NAME",
-                             _g_prefix, name);
-
-            if ((r != NULL))
-                filler(buf, strdup(r->str), NULL, 0);
-
-            freeReplyObject(r);
+            sprintf(memcommand+strlen(memcommand), " %s:INODE:%s:NAME", _g_prefix, name);
         }
+	redisReply *r = NULL;
+        r = redisCommand(_g_redis, memcommand);
+        for (i = 0; i < reply->elements; i++)
+        {
+
+            if ((r->element[i] != NULL))
+                filler(buf, strdup(r->element[i]->str), NULL, 0);
+
+        }
+        freeReplyObject(r);
     }
 
     freeReplyObject(reply);
@@ -576,48 +579,43 @@ fs_getattr(const char *path, struct stat *stbuf)
     freeReplyObject(reply);
 
     /**
-     *  Type
+     *  Type - batch up some commands here for later use
      */
-    reply = redisCommand(_g_redis,"GET %s:INODE:%d:TYPE", _g_prefix, inode);
-    if ((reply != NULL) && (reply->type == REDIS_REPLY_STRING))
+    reply = redisCommand(_g_redis,"MGET %s:INODE:%d:TYPE %s:INODE:%d:MODE %s:INODE:%d:SIZE", 
+			_g_prefix, inode, 
+			_g_prefix, inode, 
+			_g_prefix, inode);
+    if ((reply != NULL) && (reply->element[0] != NULL) && (reply->element[0]->type == REDIS_REPLY_STRING))
     {
 
-        redisReply *r =
-            redisCommand(_g_redis, "GET %s:INODE:%d:MODE", _g_prefix, inode);
-        if ((r != NULL) && (r->type == REDIS_REPLY_STRING))
+        if ((reply->element[1] != NULL) && (reply->element[1]->type == REDIS_REPLY_STRING))
         {
-            stbuf->st_mode = atoi(r->str);
+            stbuf->st_mode = atoi(reply->element[1]->str);
         }
-        freeReplyObject(r);
 
-        if (strcmp(reply->str, "DIR") == 0)
+        if (strcmp(reply->element[0]->str, "DIR") == 0)
         {
             stbuf->st_mode |= S_IFDIR;
         }
-        else if (strcmp(reply->str, "LINK") == 0)
+        else if (strcmp(reply->element[0]->str, "LINK") == 0)
         {
             stbuf->st_mode |= S_IFLNK;
             stbuf->st_nlink = 1;
             stbuf->st_size = 0;
         }
-        else if (strcmp(reply->str, "FILE") == 0)
+        else if (strcmp(reply->element[0]->str, "FILE") == 0)
         {
-            /*
-             * Set the size.
-             */
-            redisReply *r =
-                redisCommand(_g_redis, "GET %s:INODE:%d:SIZE", _g_prefix,
-                             inode);
-            if ((r != NULL) && (r->type == REDIS_REPLY_STRING))
+            if ((reply->element[2] != NULL) && (reply->element[2]->type == REDIS_REPLY_STRING))
             {
-                stbuf->st_size = atoi(r->str);
+		if (_g_debug)
+			fprintf(stderr, "found file\n");	
+                stbuf->st_size = atoi(reply->element[2]->str);
             }
-            freeReplyObject(r);
         }
         else
         {
             if (_g_debug)
-                fprintf(stderr, "UNKNOWN ENTRY TYPE: %s\n", reply->str);
+                fprintf(stderr, "UNKNOWN ENTRY TYPE: %s\n", reply->element[0]->str);
         }
     }
     freeReplyObject(reply);
@@ -827,13 +825,9 @@ fs_write(const char *path,
       /**
        * MSET inode's size and mtime, delete, set new data
        */
-        redisAppendCommand(_g_redis, "MSET %s:INODE:%d:SIZE %d %s:INODE:%d:MTIME %d",
-					_g_prefix, inode, size, _g_prefix, inode, time(NULL));
-	redisAppendCommand(_g_redis, "SET %s:INODE:%d:DATA %b",
-			     _g_prefix, inode, mem, size);
+        redisAppendCommand(_g_redis, "MSET %s:INODE:%d:SIZE %d %s:INODE:%d:MTIME %d %s:INODE:%d:DATA %b",
+					_g_prefix, inode, size, _g_prefix, inode, time(NULL), _g_prefix, inode, mem, size);
 
-	redisGetReply(_g_redis,(void**)&reply);
-    	freeReplyObject(reply);
 	redisGetReply(_g_redis,(void**)&reply);
     	freeReplyObject(reply);
 
@@ -934,7 +928,6 @@ fs_read(const char *path, char *buf, size_t size, off_t offset,
      */
     reply = redisCommand(_g_redis, "GETRANGE %s:INODE:%d:DATA %lu %lu", _g_prefix, inode, offset, size+offset );
 
-    //size_t len = reply->len;
     /**
      * Copy the data into the callee's buffer.
      */
@@ -1568,9 +1561,7 @@ fs_rename(const char *old, const char *path)
     /**
      * Finally we flush any cached INODE lookup results.
      */
-    reply = redisCommand(_g_redis, "DEL %s:PATH:%s", _g_prefix, old);
-    freeReplyObject(reply);
-    reply = redisCommand(_g_redis, "DEL %s:PATH:%s", _g_prefix, path);
+    reply = redisCommand(_g_redis, "DEL %s:PATH:%s %s:PATH:%s", _g_prefix, old, _g_prefix, path);
     freeReplyObject(reply);
 
     pthread_mutex_unlock(&_g_lock);
