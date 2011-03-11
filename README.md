@@ -8,4 +8,5 @@ More optimisations could be had by forcing the FUSE driver to use a larger block
 
 The main optimisation was command bundling (issuing many commands to redis at once) and changing the mech for data copy to use the APPEND operation, rather than GET, memcpy, SET.
 
-There is still a bit more optimisation that could be done in the connection check and find_inode features, I have changed the connection check so it will only PING redis after 2 seconds from the last PING.
+Read speed on the test machine here now is around 150MB/sec, after changing to GETRANGE to grab the file contents from Redis, up from about 250kb/sec or so. 
+
