@@ -369,7 +369,7 @@ find_inode(const char *path)
         }
         freeReplyObject(r);
     }
-
+    free(memcommand);
     freeReplyObject(reply);
 
     free(parent);
@@ -490,7 +490,7 @@ fs_readdir(const char *path,
         }
         freeReplyObject(r);
     }
-
+    free(memcommand);
     freeReplyObject(reply);
 
     pthread_mutex_unlock(&_g_lock);
